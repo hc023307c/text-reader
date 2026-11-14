@@ -79,6 +79,7 @@ progress { width: 100%; height: 8px; accent-color: #174839; display: block; marg
     <div class="actions"><button class="primary" id="play">▶ 播放</button><button id="pause">暫停</button><button id="stop">停止</button></div>
     <small id="status" role="status">請輸入朗讀文字</small>
   </div>
+  <p id="screenStatus" class="hint" hidden></p>
   <progress id="progress" max="1" value="0" aria-label="朗讀進度"></progress>
   <p id="current" class="hint" hidden></p>
 </section>
@@ -110,11 +111,62 @@ const knownVoices = [
 const synth = window.speechSynthesis;
 const supported = Boolean(synth && window.SpeechSynthesisUtterance);
 const ui = Object.fromEntries(
-  "text example clear count language gender voice voiceHint style rate speed preview play pause stop status progress current"
+  "text example clear count language gender voice voiceHint style rate speed preview play pause stop status screenStatus progress current"
     .split(" ").map(id => [id, document.getElementById(id)])
 );
 let availableVoices = [];
 let run = null;
+let screenLock = null;
+let screenRequest = null;
+
+function syncScreenLock() {
+  if (!run || run.paused || document.visibilityState !== "visible") {
+    screenRequest = null;
+    const previousLock = screenLock;
+    screenLock = null;
+    ui.screenStatus.hidden = true;
+    if (previousLock) previousLock.release().catch(() => {});
+    return;
+  }
+  if (screenLock || screenRequest) return;
+  ui.screenStatus.hidden = false;
+  if (!navigator.wakeLock) {
+    ui.screenStatus.textContent = "此瀏覽器無法在朗讀時保持螢幕喚醒。";
+    return;
+  }
+  const request = {};
+  screenRequest = request;
+  requestScreenLock(request);
+}
+
+async function requestScreenLock(request) {
+  try {
+    const lock = await navigator.wakeLock.request("screen");
+    if (screenRequest !== request) {
+      await lock.release();
+      return;
+    }
+    if (lock.released) {
+      ui.screenStatus.textContent = "螢幕可能會自動鎖定。";
+      return;
+    }
+    screenLock = lock;
+    ui.screenStatus.textContent = "朗讀期間保持螢幕喚醒";
+    lock.addEventListener("release", () => {
+      if (screenLock !== lock) return;
+      screenLock = null;
+      ui.screenStatus.textContent = "螢幕可能會自動鎖定。";
+    }, {once: true});
+  } catch {
+    if (screenRequest === request) {
+      ui.screenStatus.textContent = "無法保持螢幕喚醒，螢幕可能會自動鎖定。";
+    }
+  } finally {
+    if (screenRequest === request) screenRequest = null;
+  }
+}
+
+document.addEventListener("visibilitychange", syncScreenLock);
 
 function voiceGender(voice) {
   return knownVoices.find(([pattern]) => pattern.test(voice.name))?.[1] ?? "";
@@ -162,6 +214,7 @@ function updateControls() {
 function reset(message) {
   const previous = run;
   run = null;
+  syncScreenLock();
   if (previous) {
     clearTimeout(previous.timer);
     synth.cancel();
@@ -204,6 +257,7 @@ function speakNext(session) {
   if (run !== session || session.paused) return;
   if (session.index >= session.parts.length) {
     run = null;
+    syncScreenLock();
     ui.current.hidden = true;
     ui.status.textContent = session.preview ? "試聽完成" : "朗讀完成";
     updateControls();
@@ -251,6 +305,7 @@ function start(preview) {
   ui.progress.max = parts.length;
   updateControls();
   speakNext(run);
+  syncScreenLock();
 }
 function editText() {
   ui.count.textContent = `${Array.from(ui.text.value).length.toLocaleString("zh-TW")} 字元`;
@@ -280,6 +335,7 @@ ui.stop.onclick = () => reset("已停止");
 ui.pause.onclick = () => {
   if (!run) return;
   run.paused = !run.paused;
+  syncScreenLock();
   if (run.paused) {
     clearTimeout(run.timer);
     if (run.utterance) synth.pause();
