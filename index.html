@@ -1,0 +1,299 @@
+<!doctype html>
+<html lang="zh-Hant-TW">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#f5f4ef">
+<title>聽文字｜中英文朗讀</title>
+<style>
+* { box-sizing: border-box }
+body { margin: 0; background: #f5f4ef; color: #182e29; font: 16px/1.55 "Inter", "Noto Sans TC", system-ui, sans-serif }
+main { max-width: 1120px; padding: 42px 28px 24px; margin: auto }
+header { display: flex; align-items: center; gap: 14px; margin-bottom: 30px }
+.mark { width: 48px; height: 48px; display: grid; place-items: center; background: #174839; color: #fff; border-radius: 14px; font-size: 25px }
+h1,h2,p { margin: 0 }
+h1 { font-size: 32px; letter-spacing: .04em }
+h2 { font-size: 19px }
+small,.hint { color: #4a6259; font-size: 14px }
+.grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(280px, 340px); gap: 20px }
+.panel { background: #fff; border: 1px solid #dbe2da; border-radius: 20px; padding: 22px }
+.row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; justify-content: space-between }
+textarea,select,button,input { font: inherit }
+textarea,select { width: 100%; color: inherit; background: #fafbf8; border: 1px solid #ccd9d0; border-radius: 10px; padding: 10px }
+textarea { display: block; min-height: 346px; margin: 14px 0 10px; padding: 16px; resize: vertical; line-height: 1.8 }
+button { cursor: pointer; color: inherit; background: #fff; border: 1px solid #ccd9d0; border-radius: 10px; padding: 7px 12px; min-height: 42px }
+button:enabled:hover { background: #e7f1e9 }
+button:disabled { opacity: .5; cursor: default }
+button.primary { color: #fff; background: #174839; border-color: #174839; font-weight: 700 }
+button.primary:enabled:hover { background: #21614d }
+:focus-visible { outline: 3px solid #357e69; outline-offset: 2px }
+label { display: block; font-weight: 650; margin: 12px 0 4px }
+input[type=range] { width: 100%; accent-color: #174839 }
+.actions { display: flex; flex-wrap: wrap; gap: 8px }
+.settings .hint { min-height: 44px; margin: 6px 0 10px }
+.player { position: sticky; z-index: 1; bottom: 0; margin-top: 20px; padding: 12px 16px max(12px, env(safe-area-inset-bottom)); background: #f5f4ef; border: 1px solid #dbe2da; border-radius: 14px }
+progress { width: 100%; height: 8px; accent-color: #174839; display: block; margin-top: 10px }
+#current { margin-top: 8px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis }
+@media (max-width: 710px) {
+  main { padding: 20px 12px 14px }
+  header { margin-bottom: 16px }
+  .grid { grid-template-columns: 1fr; gap: 12px }
+  .panel { padding: 14px }
+  textarea { min-height: 210px }
+  .player { margin-top: 12px }
+  .player .row { gap: 4px }
+}
+</style>
+</head>
+<body>
+<main>
+<header>
+  <div class="mark" aria-hidden="true">♪</div>
+  <div><h1>聽文字</h1><p class="hint">貼上文章，選個聲音來聽。</p></div>
+</header>
+<div class="grid">
+  <section class="panel" aria-labelledby="text-title">
+    <div class="row">
+      <h2 id="text-title"><label for="text" style="margin:0">朗讀文字</label></h2>
+      <div class="actions"><button id="example">載入範例</button><button id="clear">清空</button></div>
+    </div>
+    <textarea id="text" placeholder="在這裡貼上想朗讀的文字…" spellcheck="false"></textarea>
+    <small id="count">0 字元</small>
+  </section>
+  <section class="panel settings" aria-labelledby="settings-title">
+    <h2 id="settings-title">聲音設定</h2>
+    <label for="language">朗讀語言</label><select id="language"></select>
+    <label for="gender">聲線</label>
+    <select id="gender"><option value="">全部聲線</option><option value="男聲">男聲</option><option value="女聲">女聲</option></select>
+    <label for="voice">語音</label><select id="voice" aria-describedby="voiceHint"></select>
+    <p id="voiceHint" class="hint"></p>
+    <label for="style">朗讀風格</label>
+    <select id="style"><option value="natural">自然</option><option value="anchor">播音員</option><option value="story">聲優旁白</option></select>
+    <label for="rate">語速 <output id="speed" for="rate">1.00×</output></label>
+    <input id="rate" type="range" min="0.50" max="1.50" step="0.01" value="1">
+    <button id="preview">試聽聲音</button>
+  </section>
+</div>
+<section class="player" aria-label="播放控制">
+  <div class="row">
+    <div class="actions"><button class="primary" id="play">▶ 播放</button><button id="pause">暫停</button><button id="stop">停止</button></div>
+    <small id="status" role="status">請輸入朗讀文字</small>
+  </div>
+  <progress id="progress" max="1" value="0" aria-label="朗讀進度"></progress>
+  <p id="current" class="hint" hidden></p>
+</section>
+</main>
+<script>
+"use strict";
+const languages = {
+  "zh-TW": {
+    label: "繁體中文（台灣）", rate: 1, segmentLimit: 85,
+    sample: "今天的天氣很舒服。讓我們慢慢讀完這段文字，再試試不同的聲音和朗讀風格。"
+  },
+  "en-US": {
+    label: "English (US)", rate: 0.67, segmentLimit: 170,
+    sample: "Good morning. Let's read this passage together. Try different voices and listen to how the rhythm changes."
+  }
+};
+const styles = {
+  natural: {rate: 1, pitch: 1, gap: 0},
+  anchor: {rate: 0.94, pitch: 0.90, gap: 180},
+  story: {rate: 0.87, pitch: 1.10, gap: 350}
+};
+// Match known names only. Browsers can supply names without gender metadata.
+const knownVoices = [
+  [/^(?:Microsoft )?(?:David|Mark|Guy|Christopher|YunJhe)(?:$|\b)/i, "男聲"],
+  [/^(?:Microsoft )?(?:Zira|Aria|Jenny|Michelle|Xiaoxiao|HsiaoChen|Hanhan|Yating)(?:$|\b)/i, "女聲"],
+  [/^(?:Alex|Fred|Reed|Daniel|Eddy)(?:$|\s*\()/i, "男聲"],
+  [/^(?:Samantha|Victoria|Karen|Moira|Shelley|Flo|Tingting|Meijia)(?:$|\s*\()/i, "女聲"]
+];
+const synth = window.speechSynthesis;
+const supported = Boolean(synth && window.SpeechSynthesisUtterance);
+const ui = Object.fromEntries(
+  "text example clear count language gender voice voiceHint style rate speed preview play pause stop status progress current"
+    .split(" ").map(id => [id, document.getElementById(id)])
+);
+let availableVoices = [];
+let run = null;
+
+function voiceGender(voice) {
+  return knownVoices.find(([pattern]) => pattern.test(voice.name))?.[1] ?? "";
+}
+function selectedVoice() {
+  return availableVoices[Number(ui.voice.value)];
+}
+function loadVoices() {
+  const previous = ui.voice.value === "" ? undefined : selectedVoice()?.voiceURI;
+  const locale = ui.language.value.toLowerCase();
+  const primary = locale.split("-")[0];
+  const sortScore = voice => Number(voice.lang.toLowerCase() === locale) * 4
+    + Number(voice.localService) * 2 + Number(voice.default);
+  availableVoices = (supported ? synth.getVoices() : []).filter(voice => {
+    const tag = voice.lang.toLowerCase();
+    return primary === "zh"
+      ? /^(zh-(tw|hant(?:-tw)?|cn|hans(?:-cn)?|sg)|cmn(-.*)?)$/.test(tag)
+      : tag.split("-")[0] === primary;
+  }).filter(voice => !ui.gender.value || voiceGender(voice) === ui.gender.value)
+    .sort((a, b) => sortScore(b) - sortScore(a));
+
+  ui.voice.replaceChildren(...availableVoices.map((voice, index) => {
+    const gender = voiceGender(voice);
+    return new Option([gender, voice.name, voice.lang].filter(Boolean).join(" · "), index);
+  }));
+  const index = availableVoices.findIndex(voice => voice.voiceURI === previous);
+  if (index >= 0) ui.voice.selectedIndex = index;
+  ui.voice.disabled = !availableVoices.length;
+  if (!availableVoices.length) {
+    ui.voice.add(new Option("沒有可選語音", ""));
+  }
+  ui.voiceHint.textContent = !supported ? "這個瀏覽器無法使用語音朗讀。"
+    : availableVoices.length ? "聲線依裝置提供的語音而定。播音員與聲優旁白由語速、音高和停頓模擬。"
+    : ui.gender.value ? "找不到已標示的聲線，可切回「全部聲線」試聽。"
+    : "找不到這個語言的語音。請檢查裝置的語音設定。";
+  updateControls();
+}
+function updateControls() {
+  ui.play.disabled = !availableVoices.length || !ui.text.value.trim();
+  ui.preview.disabled = !availableVoices.length;
+  ui.pause.disabled = !run;
+  ui.pause.textContent = run?.paused ? "繼續" : "暫停";
+  ui.stop.disabled = !run;
+}
+function reset(message) {
+  const previous = run;
+  run = null;
+  if (previous) {
+    clearTimeout(previous.timer);
+    synth.cancel();
+    if (synth.paused) synth.resume();
+  }
+  ui.progress.value = 0;
+  ui.current.hidden = true;
+  ui.status.textContent = message;
+  updateControls();
+}
+function splitText(text, locale, limit) {
+  const segmenter = typeof Intl.Segmenter === "function"
+    ? new Intl.Segmenter(locale, {granularity: "sentence"}) : null;
+  return text.trim().split(/\n+/).flatMap(paragraph => {
+    const sentences = segmenter ? Array.from(segmenter.segment(paragraph), part => part.segment)
+      : paragraph.match(/[^。！？!?]+[。！？!?]*|[。！？!?]+/gu) ?? [];
+    return sentences.flatMap(sentence => {
+      const chars = Array.from(sentence.trim());
+      const parts = [];
+      for (let start = 0; start < chars.length;) {
+        let end = Math.min(start + limit, chars.length);
+        if (end < chars.length) {
+          const minimum = start + Math.floor(limit / 2);
+          for (let cut = end - 1; cut >= minimum; cut--) {
+            if (/[\s，、；：,;:]/u.test(chars[cut])) {
+              end = cut + 1;
+              break;
+            }
+          }
+        }
+        const part = chars.slice(start, end).join("").trim();
+        if (part) parts.push(part);
+        start = end;
+      }
+      return parts;
+    });
+  });
+}
+function speakNext(session) {
+  if (run !== session || session.paused) return;
+  if (session.index >= session.parts.length) {
+    run = null;
+    ui.current.hidden = true;
+    ui.status.textContent = session.preview ? "試聽完成" : "朗讀完成";
+    updateControls();
+    return;
+  }
+  const text = session.parts[session.index];
+  const utterance = new SpeechSynthesisUtterance(text);
+  session.utterance = utterance;
+  utterance.voice = session.voice;
+  utterance.lang = session.voice.lang;
+  utterance.pitch = session.style.pitch;
+  utterance.rate = session.rate * session.style.rate;
+  ui.status.textContent = session.preview ? "試聽中" : `第 ${session.index + 1} / ${session.parts.length} 段`;
+  ui.current.hidden = false;
+  ui.current.textContent = text;
+  utterance.onend = () => {
+    if (run !== session) return;
+    session.utterance = null;
+    session.index += 1;
+    ui.progress.value = session.index;
+    if (session.index === session.parts.length || !session.style.gap) {
+      speakNext(session);
+    } else {
+      session.timer = setTimeout(() => speakNext(session), session.style.gap);
+    }
+  };
+  utterance.onerror = event => {
+    if (run !== session) return;
+    const message = {
+      "not-allowed": "瀏覽器阻擋播放，請重新按下播放。",
+      "network": "語音服務連線失敗，請試試其他語音。",
+      "audio-hardware": "找不到可用的音訊輸出裝置。"
+    }[event.error] ?? "這個語音目前無法播放，請試試其他語音。";
+    reset(message);
+  };
+  synth.speak(utterance);
+}
+function start(preview) {
+  const voice = selectedVoice();
+  const config = languages[ui.language.value];
+  const parts = splitText(preview ? config.sample : ui.text.value, ui.language.value, config.segmentLimit);
+  if (!voice || !parts.length) return;
+  reset("");
+  run = {voice, parts, preview, index: 0, paused: false, style: styles[ui.style.value], rate: Number(ui.rate.value)};
+  ui.progress.max = parts.length;
+  updateControls();
+  speakNext(run);
+}
+function editText() {
+  ui.count.textContent = `${Array.from(ui.text.value).length.toLocaleString("zh-TW")} 字元`;
+  reset(ui.text.value.trim() ? "準備朗讀" : "請輸入朗讀文字");
+}
+function setRate() {
+  ui.speed.value = `${Number(ui.rate.value).toFixed(2)}×`;
+}
+
+ui.language.replaceChildren(...Object.entries(languages).map(([code, config]) => new Option(config.label, code)));
+ui.language.onchange = () => {
+  reset("已切換語言");
+  ui.rate.value = languages[ui.language.value].rate;
+  setRate();
+  loadVoices();
+};
+ui.gender.onchange = () => { reset("已切換聲線"); loadVoices(); };
+ui.voice.onchange = () => reset("已切換語音");
+ui.style.onchange = () => reset("已切換朗讀風格");
+ui.rate.oninput = () => { setRate(); if (run) reset("已調整語速，請重新播放"); };
+ui.text.oninput = editText;
+ui.clear.onclick = () => { ui.text.value = ""; editText(); ui.text.focus(); };
+ui.example.onclick = () => { ui.text.value = languages[ui.language.value].sample; editText(); };
+ui.preview.onclick = () => start(true);
+ui.play.onclick = () => start(false);
+ui.stop.onclick = () => reset("已停止");
+ui.pause.onclick = () => {
+  if (!run) return;
+  run.paused = !run.paused;
+  if (run.paused) {
+    clearTimeout(run.timer);
+    if (run.utterance) synth.pause();
+    ui.status.textContent = "已暫停";
+  } else if (run.utterance) {
+    synth.resume();
+    ui.status.textContent = run.preview ? "試聽中" : `第 ${run.index + 1} / ${run.parts.length} 段`;
+  } else {
+    speakNext(run);
+  }
+  updateControls();
+};
+if (supported) synth.addEventListener("voiceschanged", loadVoices);
+loadVoices();
+</script>
+</body>
+</html>
